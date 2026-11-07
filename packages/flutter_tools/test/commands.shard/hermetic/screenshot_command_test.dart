@@ -296,6 +296,41 @@ Device 2 (mobile) • 456 • android • 1.2.3
         contains('The Skia picture request failed, probably because the device was disconnected'),
       );
     });
+
+    testWithoutContext('Skia screenshot throws ToolExit on RPCError (e.g. Impeller enabled)', () async {
+      final fs = MemoryFileSystem.test();
+      final logger = BufferLogger.test();
+      final toolContext = FakeToolContext(fs: fs, logger: logger);
+
+      final fakeVmService = _FakeFlutterVmService(
+        rpcError: vm_service.RPCError('screenshotSkp', -32000, 'Cannot capture SKP screenshot with Impeller enabled.'),
+      );
+
+      final command = ScreenshotCommand(
+        toolContext: toolContext,
+        vmServiceConnector:
+            (
+              Uri uri, {
+              ReloadSources? reloadSources,
+              Restart? restart,
+              CompileExpression? compileExpression,
+              FlutterProject? flutterProject,
+              FlutterVersion? flutterVersion,
+              PrintStructuredErrorLogMethod? printStructuredErrorLogMethod,
+              CompressionOptions compression = CompressionOptions.compressionDefault,
+              Device? device,
+              required Logger logger,
+            }) async {
+              return fakeVmService;
+            },
+      );
+
+      expect(
+        () => createTestCommandRunner(command)
+            .run(<String>['screenshot', '--type=skia', '--vm-service-url=http://localhost:8181']),
+        throwsToolExit(message: 'Cannot capture SKP screenshot with Impeller enabled.'),
+      );
+    });
   });
 }
 
@@ -366,10 +401,16 @@ class _TestDeviceManager extends DeviceManager {
 }
 
 class _FakeFlutterVmService extends Fake implements FlutterVmService {
-  _FakeFlutterVmService({this.response});
+  _FakeFlutterVmService({this.response, this.rpcError});
 
   final vm_service.Response? response;
+  final vm_service.RPCError? rpcError;
 
   @override
-  Future<vm_service.Response?> screenshotSkp() async => response;
+  Future<vm_service.Response?> screenshotSkp() async {
+    if (rpcError != null) {
+      throw rpcError!;
+    }
+    return response;
+  }
 }
